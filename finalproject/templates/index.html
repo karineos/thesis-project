@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="static/css/style.css">
+    <title>Face Recognition and Emotion Detection</title>
+</head>
+
+<body>
+    <section class="title">
+        <h1>Face Recognition and Emotion Detection Chatbot</h1>
+        <h2 id="typing-text">Hello I'm your AI assistant Carla, what's your name?</h2>
+        <h6>Please type in your name</h6>
+    </section>
+
+    <section class="input">
+        <video autoplay muted loop id="background-video">
+            <source src="static/css/images/input.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+
+        <form id="name_form">
+            <input type="text" id="name_input" name="name" placeholder="Enter your name" required>
+            <button type="submit" id="submit_button">Start</button>
+            <div class="button">
+                <a href="#chatbot" class="btn light"> </a>
+           </div>
+        </form>
+
+    
+
+    </section>
+
+    <section class="camera">
+        <div>
+            <img id="video_feed" src="" alt="Video Feed" style="display: none;">
+        </div>
+    </section>
+
+    <section id="chatbot" class="chatbot">
+        <div class="switch-container">
+            <div class="switch-wrapper">
+                <span class="switch-label">Microphone</span>
+                <label class="switch">
+                    <input type="checkbox" id="microphone">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="switch-wrapper">
+                <span class="switch-label">Video Feed</span>
+                <label class="switch">
+                    <input type="checkbox" id="video_feed_toggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="switch-wrapper">
+                <span class="switch-label">Hands-off</span>
+                <label class="switch">
+                    <input type="checkbox" id="blind_mode">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <div id="chat_container"></div>
+
+    <section class="history-button">
+        <button onclick="window.location.href='/emotion_history_page'">Show Emotion History</button>
+    </section>
+
+    <script>
+        let isRecording = false;
+let isBlindMode = false;
+let speechTimeout;
+let currentTranscript = '';
+let interimTranscript = '';
+const microphone = document.getElementById('microphone');
+const blindMode = document.getElementById('blind_mode');
+const chatContainer = document.getElementById('chat_container');
+const nameInput = document.getElementById('name_input');
+const nameForm = document.getElementById('name_form');
+const videoFeedToggle = document.getElementById('video_feed_toggle');
+const videoFeed = document.getElementById('video_feed');
+
+function speakText(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+}
+
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+recognition.lang = 'en-US';
+recognition.interimResults = true;
+recognition.continuous = true;
+
+recognition.onresult = function(event) {
+    interimTranscript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+            currentTranscript += event.results[i][0].transcript;
+        } else {
+            interimTranscript += event.results[i][0].transcript;
+        }
+    }
+    updateCurrentMessageBubble(currentTranscript + interimTranscript);
+    startSpeechTimeout(); // Reset the timeout on new speech input
+};
+
+recognition.onend = function() {
+    if (isRecording || isBlindMode) {
+        recognition.start(); // Restart recognition if in recording or blind mode
+    }
+};
+
+microphone.addEventListener('change', () => {
+    if (microphone.checked) {
+        recognition.start();
+        isRecording = true;
+        createMessageBubble();
+    } else {
+        recognition.stop();
+        isRecording = false;
+        sendFinalMessageBubble(currentTranscript);
+        currentTranscript = ''; // Reset the transcript
+    }
+});
+
+videoFeedToggle.addEventListener('change', () => {
+    const name = nameInput.value || 'default';
+    if (videoFeedToggle.checked) {
+        videoFeed.src = `/video_feed?name=${encodeURIComponent(name)}`;
+        videoFeed.style.display = 'block';
+    } else {
+        videoFeed.style.display = 'none';
+        videoFeed.src = '';
+    }
+});
+
+blindMode.addEventListener('change', () => {
+    if (blindMode.checked) {
+        isBlindMode = true;
+        recognition.start();
+        createMessageBubble();
+        startSpeechTimeout(); // Start the timeout for blind mode
+    } else {
+        isBlindMode = false;
+        recognition.stop();
+        if (speechTimeout) clearTimeout(speechTimeout);
+        sendFinalMessageBubble(currentTranscript);
+        currentTranscript = ''; // Reset the transcript
+    }
+});
+
+function createMessageBubble() {
+    const message = document.createElement('div');
+    message.className = 'message user-message';
+    message.id = 'current_message';
+    chatContainer.appendChild(message);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function updateCurrentMessageBubble(text) {
+    const message = document.getElementById('current_message');
+    if (message) {
+        message.textContent = text;
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+}
+
+async function sendFinalMessageBubble(text) {
+    const message = document.getElementById('current_message');
+    if (message) {
+        message.textContent = text;
+        message.removeAttribute('id');
+
+        // Send the message to the backend and get the response
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message: text })
+        });
+
+        const data = await response.json();
+
+        // Append bot response to chat container
+        appendMessage(data.response, 'bot-message');
+        speakText(data.response);
+
+        // Append emotion message
+        if (data.emotion) {
+            appendMessage(`The general felt emotion over the last 20 seconds is: ${data.emotion}`, 'bot-message');
+        }
+    }
+}
+
+function appendMessage(text, type) {
+    const message = document.createElement('div');
+    message.className = `message ${type}`;
+    message.textContent = text;
+    chatContainer.appendChild(message);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function handleInteraction() {
+    var audio = new Audio('/output.mp3');
+    audio.play();
+
+    setTimeout(function() {
+        nameInput.style.display = 'block';
+        document.getElementById('submit_button').style.display = 'block';
+        nameInput.focus();
+    }, 6000);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    handleInteraction();
+
+    nameForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const name = nameInput.value;
+
+        // Simulate a response from the bot
+        setTimeout(() => {
+            appendMessage('Hello ' + name + '! How can I assist you today?', 'bot-message');
+        }, 1000);
+
+        videoFeed.src = `/video_feed?name=${encodeURIComponent(name)}`;
+        videoFeed.style.maxWidth = "60%";
+        videoFeed.style.width = "100%";
+    });
+});
+
+let timeoutDuration = 4000; // 10 seconds timeout duration
+function startSpeechTimeout() {
+    if (speechTimeout) clearTimeout(speechTimeout);
+    speechTimeout = setTimeout(() => {
+        if (isBlindMode) {
+            sendFinalMessageBubble(currentTranscript);
+            currentTranscript = ''; // Reset the transcript
+            createMessageBubble(); // Create new bubble for next input
+        }
+    }, timeoutDuration);
+}
+
+recognition.onaudiostart = function() {
+    if (isBlindMode) startSpeechTimeout();
+};
+
+recognition.onaudioend = function() {
+    if (isBlindMode) startSpeechTimeout();
+};
+
+
+    </script>
+<script>
+    // Array of sensitive words or phrases
+    const sensitiveWords = ["suicide", "end my life", "kill myself", "depression", "hopeless", "dark thoughts", "self-harm", "worthless","die","dead","death", "nobody cares", "no point in living"];
+
+    // Function to check for sensitive words
+    function checkForSensitiveWords(text) {
+        for (let word of sensitiveWords) {
+            if (text.toLowerCase().includes(word.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    async function sendFinalMessageBubble(text) {
+        const message = document.getElementById('current_message');
+        if (message) {
+            message.textContent = text;
+            message.removeAttribute('id');
+
+            // Check for sensitive words before sending the message
+            if (checkForSensitiveWords(text)) {
+                alert("It looks like you're going through a tough time. Please consider talking to someone who can help you. You're not alone.");
+            }
+
+            // Send the message to the backend and get the response
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: text })
+            });
+
+            const data = await response.json();
+
+            // Append bot response to chat container
+            appendMessage(data.response, 'bot-message');
+            speakText(data.response);
+
+            // Append emotion message
+            if (data.emotion) {
+                appendMessage(`The general felt emotion over the last 20 seconds is: ${data.emotion}`, 'bot-message');
+            }
+        }
+    }
+</script>
+
+    <script src="static/js/typing.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion History</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body style="background-color: black;">
+    <h1 style="color: azure;">Emotions captured during the live</h1>
+    <div id="emotion-history" style="color: aliceblue;"></div>
+
+    <script>
+        $(document).ready(function() {
+            $.ajax({
+                url: '/emotion_history',
+                method: 'GET',
+                success: function(data) {
+                    var emotionHistoryDiv = $('#emotion-history');
+                    emotionHistoryDiv.empty();  // Clear previous history
+
+                    if (data.emotion_history.length > 0) {
+                        var historyHtml = '<ul>';
+                        data.emotion_history.forEach(function(item) {
+                            var dateTime = new Date(item.timestamp);
+                            var localTime = dateTime.toLocaleString();
+                            historyHtml += `<li>${localTime}: ${item.emotion}</li>`;
+                        });
+                        historyHtml += '</ul>';
+                        emotionHistoryDiv.html(historyHtml);
+                    } else {
+                        emotionHistoryDiv.html('<p>No emotion history available.</p>');
+                    }
+                },
+                error: function(err) {
+                    console.error('Error fetching emotion history:', err);
+                    $('#emotion-history').html('<p>Error fetching emotion history.</p>');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
